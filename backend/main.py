@@ -1,10 +1,21 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any, Dict, List
 import sqlite3
 from pathlib import Path
+from graph_builder import get_graph_json
 
 app = FastAPI(title='SAP O2C Graph System (Backend)')
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 DB_PATH = Path(__file__).resolve().parent / 'o2c.db'
 
@@ -44,6 +55,50 @@ def graph_sample(table_name: str, limit: int = 20) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail='Table not found')
     finally:
         conn.close()
+
+@app.get('/graph/nodes')
+def graph_nodes() -> Dict[str, Any]:
+    """Return all graph nodes."""
+    graph_data = get_graph_json()
+    return {
+        'nodes': graph_data['nodes'],
+        'count': len(graph_data['nodes'])
+    }
+
+@app.get('/graph/edges')
+def graph_edges() -> Dict[str, Any]:
+    """Return all graph edges."""
+    graph_data = get_graph_json()
+    return {
+        'edges': graph_data['edges'],
+        'count': len(graph_data['edges'])
+    }
+
+@app.get('/graph/full')
+def graph_full() -> Dict[str, Any]:
+    """Return complete graph data (nodes + edges)."""
+    return get_graph_json()
+
+@app.get('/graph/entity/{entity_id}')
+def graph_entity(entity_id: str) -> Dict[str, Any]:
+    """Get details of a specific entity and its connections."""
+    graph_data = get_graph_json()
+    
+    node = None
+    for n in graph_data['nodes']:
+        if n['id'] == entity_id:
+            node = n
+            break
+    
+    if not node:
+        raise HTTPException(status_code=404, detail='Entity not found')
+    
+    related_edges = [e for e in graph_data['edges'] if e['source'] == entity_id or e['target'] == entity_id]
+    
+    return {
+        'node': node,
+        'connections': related_edges
+    }
 
 class QueryRequest(BaseModel):
     prompt: str

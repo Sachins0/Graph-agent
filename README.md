@@ -77,23 +77,32 @@ This project implements a graph-based data modeling and query system for SAP Ord
   - `/healthz` ✅
   - `/graph/tables` ✅ (returns all table names)
   - `/graph/sample/{table}` ✅ (returns sample rows)
+  - `/graph/nodes` ✅ (returns graph nodes)
+  - `/graph/edges` ✅ (returns graph edges)
+  - `/graph/full` ✅ (returns complete graph)
+  - `/graph/entity/{id}` ✅ (returns entity details & connections)
   - `/query` ✅ (executes SQL, returns data)
+
+### Graph Engine ✅
+- NetworkX graph builder implemented
+- Entities modeled: SalesOrderHeader, SalesOrderItem, DeliveryHeader, DeliveryItem, BillingHeader, BillingItem, JournalEntry, Payment, Customer, Product
+- Relationships: contains_item, fulfilled_by, billed_from, recorded_in_je, places_order, includes_product
 
 ### Frontend ✅
 - npm install fixed with `--legacy-peer-deps`
 - React + Vite setup ready
+- Force-directed graph visualization connected
+- Node selection and entity detail view
+- Query UI with keyboard shortcuts
 
 ### Database ✅
 - SQLite DB created with all SAP O2C tables
 - Sample query working: products with highest billing document counts
 
 ## Next steps
-- Implement link analysis & graph engine:
-  - `backend/graph_builder.py` (NetworkX graph from SQLite)
-  - `/graph/nodes`, `/graph/edges` endpoints
-  - connect `frontend` graph visualization to backend data
 - Implement LLM query translation:
   - `backend/llm.py`
-  - integrate Google Gemini (or other free API) for prompt→SQL and NL reponse
+  - integrate Google Gemini (or other free API) for prompt→SQL and NL response
   - better guardrails + one-shot example set
+- Add filtering, search, and advanced graph analysis
 
