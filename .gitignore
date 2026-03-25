@@ -1,0 +1,32 @@
+# Write correct .gitignore from repo root (sap-o2c-graph-system/)
+cat > .gitignore << 'EOF'
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+__pycache__/
+*.pyc
+*.pyo
+
+# Database (generated, do not commit)
+backend/o2c.db
+o2c.db
+*.db
+
+# Dataset (large files, keep outside repo)
+sap-o2c-data/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+EOF

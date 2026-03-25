@@ -1,41 +1,117 @@
 import json
-import os
+import sqlite3
 from pathlib import Path
-from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Integer, Float, MetaData, Table
+from typing import Dict, List, Any
 
-DATA_DIR = Path(__file__).resolve().parent.parent / 'sap-o2c-data'
-DB_PATH = Path(__file__).resolve().parent / 'o2c_graph.db'
+DATA_ROOT = Path(__file__).resolve().parent.parent / 'sap-o2c-data'
+DB_PATH = Path(__file__).resolve().parent / 'o2c.db'
 
-# simplified data model used for ingestion
+TABLES = {
+    'sales_order_headers': {'pk': ['salesOrder']},
+    'sales_order_items': {'pk': ['salesOrder', 'salesOrderItem']},
+    'outbound_delivery_headers': {'pk': ['deliveryDocument']},
+    'outbound_delivery_items': {'pk': ['deliveryDocument', 'deliveryDocumentItem']},
+    'billing_document_headers': {'pk': ['billingDocument']},
+    'billing_document_items': {'pk': ['billingDocument', 'billingDocumentItem']},
+    'journal_entry_items_accounts_receivable': {'pk': ['accountingDocument', 'accountingDocumentItem']},
+    'payments_accounts_receivable': {'pk': ['accountingDocument', 'accountingDocumentItem']},
+    'business_partners': {'pk': ['businessPartner']},
+    'product_descriptions': {'pk': ['material']},
+    'product_plants': {'pk': ['material', 'plant']},
+    'product_storage_locations': {'pk': ['material', 'storageLocation']},
+    'plants': {'pk': ['plant']},
+    'customer_company_assignments': {'pk': ['soldToParty', 'companyCode']},
+    'customer_sales_area_assignments': {'pk': ['soldToParty', 'salesOrganization', 'distributionChannel', 'organizationDivision']},
+    'business_partner_addresses': {'pk': ['businessPartner', 'addressID']}
+}
 
-def create_db():
-    engine = create_engine(f"sqlite:///{DB_PATH}", echo=False, future=True)
-    metadata = MetaData()
 
-    # example table
-    sales_order_headers = Table(
-        'sales_order_headers', metadata,
-        Column('salesOrder', String, primary_key=True),
-        Column('soldToParty', String),
-        Column('creationDate', String),
-        Column('totalNetAmount', String),
-    )
-
-    metadata.create_all(engine)
-    return engine
+def detect_sqlite_type(value: Any) -> str:
+    if value is None:
+        return 'TEXT'
+    if isinstance(value, bool):
+        return 'INTEGER'  # SQLite stores bool as int
+    if isinstance(value, int):
+        return 'INTEGER'
+    if isinstance(value, float):
+        return 'REAL'
+    return 'TEXT'
 
 
-def read_jsonl(path):
-    with open(path, 'r', encoding='utf8') as f:
+def normalize_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    return json.dumps(value, default=str)
+
+
+def read_jsonl_file(filepath: Path) -> List[Dict]:
+    rows = []
+    with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
-            if line.strip():
-                yield json.loads(line)
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
 
 
-def load_sales_order_headers(engine):
-    table = engine.table_names()  # placeholder, SQLAlchemy 2.0 use inspect
-    # actual implementation later
-    pass
+def create_table(conn: sqlite3.Connection, table_name: str, sample_row: Dict):
+    columns = []
+    for col, val in sample_row.items():
+        col_type = detect_sqlite_type(val)
+        columns.append(f'"{col}" {col_type}')
+
+    create_stmt = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(columns)})'
+    conn.execute(create_stmt)
+
+
+def ingest_table(conn: sqlite3.Connection, table_name: str, data: List[Dict]):
+    if not data:
+        return
+
+    columns = list(data[0].keys())
+    placeholders = ', '.join('?' for _ in columns)
+    insert_stmt = f'INSERT OR IGNORE INTO "{table_name}" ({", ".join(f'"{c}"' for c in columns)}) VALUES ({placeholders})'
+
+    for row in data:
+        values = [normalize_value(row.get(col)) for col in columns]
+        conn.execute(insert_stmt, values)
+
+
+def build_db():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        for folder in sorted(DATA_ROOT.iterdir()):
+            if not folder.is_dir():
+                continue
+            table_name = folder.name
+            jsonl_files = sorted(folder.glob('*.jsonl'))
+            if not jsonl_files:
+                continue
+
+            first_sample = None
+            for fn in jsonl_files:
+                rows = read_jsonl_file(fn)
+                if rows:
+                    first_sample = rows[0]
+                    break
+            if not first_sample:
+                continue
+
+            create_table(conn, table_name, first_sample)
+
+            for fn in jsonl_files:
+                rows = read_jsonl_file(fn)
+                if rows:
+                    ingest_table(conn, table_name, rows)
+
+        conn.commit()
+        print('Ingestion completed into', DB_PATH)
+    finally:
+        conn.close()
+
 
 if __name__ == '__main__':
-    print('Data ingestion skeleton')
+    build_db()
