@@ -15,7 +15,7 @@ import {
 } from '@mui/icons-material'
 import './App.css'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 // ── All node types including BillingHeader (was missing before) ───
 const NODE_TYPES = {
