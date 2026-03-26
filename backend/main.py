@@ -3,16 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-import sqlite3
+import sqlite3, json, asyncio
 from pathlib import Path
-import json
-from graph_builder import get_graph_json
+from datetime import datetime
+
+from graph_builder import get_graph_json, get_graph_stats, trace_billing_flow
 from llm import get_llm_service
 from guardrails import get_guardrails, QueryCategory
 
-app = FastAPI(title='SAP O2C Graph System (Backend)')
+app = FastAPI(title='SAP O2C Graph System')
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,8 +23,24 @@ app.add_middleware(
 
 DB_PATH = Path(__file__).resolve().parent / 'o2c.db'
 
-def get_db_connection():
-    return sqlite3.connect(DB_PATH)
+
+@app.on_event("startup")
+async def startup_event():
+    """Pre-build graph and warm up LLM singleton at startup."""
+    print("🚀 Starting SAP O2C Graph System...")
+    get_graph_json()        # builds + caches graph
+    get_llm_service()       # initialises Groq client
+    get_guardrails()        # initialises guardrails
+    print("✅ All systems ready.")
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ── Basic ──────────────────────────────────────────────────────────
 
 @app.get('/')
 def root():
@@ -32,264 +48,269 @@ def root():
 
 @app.get('/healthz')
 def healthz():
-    return {'status': 'healthy'}
+    data = get_graph_json()
+    return {
+        'status': 'healthy',
+        'graph_nodes': len(data['nodes']),
+        'graph_edges': len(data['edges']),
+    }
+
+
+# ── Graph endpoints ────────────────────────────────────────────────
 
 @app.get('/graph/tables')
-def graph_tables() -> Dict[str, List[str]]:
-    conn = get_db_connection()
+def graph_tables():
+    conn = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        tables = [row[0] for row in cursor.fetchall()]
-        return {'tables': tables}
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+        return {'tables': [r[0] for r in rows]}
     finally:
         conn.close()
 
 @app.get('/graph/sample/{table_name}')
-def graph_sample(table_name: str, limit: int = 20) -> Dict[str, Any]:
-    conn = get_db_connection()
+def graph_sample(table_name: str, limit: int = 20):
+    conn = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM '{table_name}' LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        payload = [dict(zip(columns, row)) for row in rows]
-        return {'table': table_name, 'rows': payload}
+        cursor = conn.execute(f'SELECT * FROM "{table_name}" LIMIT ?', (limit,))
+        cols = [d[0] for d in cursor.description]
+        return {'table': table_name, 'rows': [dict(zip(cols, r)) for r in cursor.fetchall()]}
     except sqlite3.OperationalError:
         raise HTTPException(status_code=404, detail='Table not found')
     finally:
         conn.close()
 
 @app.get('/graph/nodes')
-def graph_nodes() -> Dict[str, Any]:
-    """Return all graph nodes."""
-    graph_data = get_graph_json()
-    return {
-        'nodes': graph_data['nodes'],
-        'count': len(graph_data['nodes'])
-    }
+def graph_nodes():
+    data = get_graph_json()
+    return {'nodes': data['nodes'], 'count': len(data['nodes'])}
 
 @app.get('/graph/edges')
-def graph_edges() -> Dict[str, Any]:
-    """Return all graph edges."""
-    graph_data = get_graph_json()
-    return {
-        'edges': graph_data['edges'],
-        'count': len(graph_data['edges'])
-    }
+def graph_edges():
+    data = get_graph_json()
+    return {'edges': data['edges'], 'count': len(data['edges'])}
 
 @app.get('/graph/full')
-def graph_full() -> Dict[str, Any]:
-    """Return complete graph data (nodes + edges)."""
+def graph_full():
     return get_graph_json()
 
-@app.get('/graph/entity/{entity_id}')
-def graph_entity(entity_id: str) -> Dict[str, Any]:
-    """Get details of a specific entity and its connections."""
-    graph_data = get_graph_json()
-    
-    node = None
-    for n in graph_data['nodes']:
-        if n['id'] == entity_id:
-            node = n
-            break
-    
+@app.get('/graph/stats')
+def graph_stats():
+    """Return node/edge type breakdown — used by UI stats panel."""
+    return get_graph_stats()
+
+@app.get('/graph/entity/{entity_id:path}')
+def graph_entity(entity_id: str):
+    data = get_graph_json()
+    node = next((n for n in data['nodes'] if n['id'] == entity_id), None)
     if not node:
         raise HTTPException(status_code=404, detail='Entity not found')
-    
-    related_edges = [e for e in graph_data['edges'] if e['source'] == entity_id or e['target'] == entity_id]
-    
-    return {
-        'node': node,
-        'connections': related_edges
-    }
+    connections = [
+        e for e in data['edges']
+        if e['source'] == entity_id or e['target'] == entity_id
+    ]
+    return {**node['properties'], **{'id': node['id'], 'type': node['type'],
+                                      'label': node['label'], 'connections': connections}}
+
+@app.get('/graph/trace/{billing_document}')
+def graph_trace(billing_document: str):
+    """Trace full O2C flow for a billing document: SO→Delivery→Billing→JE→Payment."""
+    result = trace_billing_flow(billing_document)
+    if 'error' in result:
+        raise HTTPException(status_code=404, detail=result['error'])
+    return result
+
+@app.post('/graph/refresh')
+def graph_refresh():
+    """Force rebuild the graph cache."""
+    data = get_graph_json(force_rebuild=True)
+    return {'status': 'refreshed', 'nodes': len(data['nodes']), 'edges': len(data['edges'])}
+
+
+# ── Query endpoint ─────────────────────────────────────────────────
 
 class QueryRequest(BaseModel):
-    prompt: str
+    prompt:      str
     include_sql: bool = True
-    streaming: bool = False
-
-class ConversationMessage(BaseModel):
-    role: str  # 'user' or 'assistant'
-    content: str
+    streaming:   bool = False
 
 @app.post('/query')
-def query_graph(req: QueryRequest) -> Dict[str, Any]:
-    """Query with LLM translation and guardrails."""
+def query_graph(req: QueryRequest):
     text = req.prompt.strip()
     if not text:
         raise HTTPException(status_code=400, detail='Prompt is required')
 
-    # Apply guardrails
     guardrails = get_guardrails()
     is_safe, message, category = guardrails.check_query(text)
 
     if not is_safe:
         return {
-            'query': text,
-            'error': message,
+            'query':    text,
+            'answer':   message,
             'category': category.value,
-            'blocked': True,
-            'hint': guardrails.get_context_hint(text)
+            'blocked':  True,
+            'hint':     guardrails.get_context_hint(text),
         }
 
-    # Get LLM service and translate to SQL
     llm = get_llm_service()
     sql, is_valid = llm.translate_nl_to_sql(text)
 
-    if not is_valid:
+    if not is_valid or not sql:
         return {
-            'query': text,
-            'error': 'Failed to translate query to SQL. Please rephrase your question.',
-            'hint': guardrails.get_context_hint(text)
+            'query':  text,
+            'answer': 'I could not generate a valid query. Please rephrase your question.',
+            'hint':   guardrails.get_context_hint(text),
         }
 
-    # Execute query
-    conn = get_db_connection()
+    conn = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        payload = [dict(zip(columns, row)) for row in rows]
+        cursor = conn.execute(sql)
+        cols    = [d[0] for d in cursor.description]
+        payload = [dict(zip(cols, row)) for row in cursor.fetchall()]
 
-        # Synthesize answer using LLM
         answer = llm.synthesize_answer(text, sql, payload)
-
-        # Add to conversation history
         llm.add_to_history(text, answer)
 
-        result = {
-            'query': text,
-            'answer': answer,
-            'rows': payload,
-            'row_count': len(payload),
-            'category': category.value
-        }
+        # Extract entity IDs from results for frontend highlight
+        highlight_ids = _extract_highlight_ids(payload)
 
+        result: Dict[str, Any] = {
+            'query':         text,
+            'answer':        answer,
+            'rows':          payload,
+            'row_count':     len(payload),
+            'category':      category.value,
+            'highlight_ids': highlight_ids,
+        }
         if req.include_sql:
             result['sql'] = sql
-
         return result
+
     except sqlite3.Error as e:
         return {
-            'query': text,
-            'error': f'Database error: {str(e)}',
-            'hint': guardrails.get_context_hint(text)
+            'query':  text,
+            'answer': f'Database error: {str(e)}. Please try rephrasing.',
+            'hint':   guardrails.get_context_hint(text),
         }
     finally:
         conn.close()
 
+
+def _extract_highlight_ids(rows: List[Dict]) -> List[str]:
+    """Try to map result rows to graph node IDs for frontend highlighting."""
+    ids = []
+    for row in rows[:20]:
+        if 'billingDocument' in row:
+            ids.append(f"BH:{row['billingDocument']}")
+        if 'salesOrder' in row:
+            ids.append(f"SO:{row['salesOrder']}")
+        if 'deliveryDocument' in row:
+            ids.append(f"DH:{row['deliveryDocument']}")
+        if 'accountingDocument' in row:
+            ids.append(f"JE:{row['accountingDocument']}")
+        if 'customer' in row or 'soldToParty' in row:
+            cid = row.get('customer') or row.get('soldToParty')
+            ids.append(f"CUST:{cid}")
+    return list(set(ids))
+
+
+# ── Streaming endpoint ─────────────────────────────────────────────
+
 @app.post('/query/streaming')
-def query_graph_streaming(req: QueryRequest) -> StreamingResponse:
-    """Query with streaming response (optional feature)."""
+async def query_streaming(req: QueryRequest):
+    """Streaming NDJSON endpoint — each line is a JSON event."""
     text = req.prompt.strip()
     if not text:
         raise HTTPException(status_code=400, detail='Prompt is required')
 
-    async def event_generator():
-        # Check guardrails
+    async def event_stream():
         guardrails = get_guardrails()
         is_safe, message, category = guardrails.check_query(text)
 
         if not is_safe:
-            yield json.dumps({
-                'type': 'error',
-                'message': message,
-                'blocked': True
-            }).encode() + b'\n'
+            yield json.dumps({'type': 'error', 'message': message, 'blocked': True}) + '\n'
             return
 
-        yield json.dumps({'type': 'status', 'message': 'Translating query...'}).encode() + b'\n'
+        yield json.dumps({'type': 'status', 'message': 'Translating to SQL...'}) + '\n'
+        await asyncio.sleep(0)
 
-        # Translate to SQL
         llm = get_llm_service()
         sql, is_valid = llm.translate_nl_to_sql(text)
 
         if not is_valid:
-            yield json.dumps({'type': 'error', 'message': 'Failed to translate query'}).encode() + b'\n'
+            yield json.dumps({'type': 'error', 'message': 'Could not generate SQL'}) + '\n'
             return
 
-        yield json.dumps({'type': 'status', 'message': 'Executing query...', 'sql': sql}).encode() + b'\n'
+        yield json.dumps({'type': 'sql', 'sql': sql}) + '\n'
+        yield json.dumps({'type': 'status', 'message': 'Executing query...'}) + '\n'
+        await asyncio.sleep(0)
 
-        # Execute
-        conn = get_db_connection()
+        conn = get_db()
         try:
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            rows = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            payload = [dict(zip(columns, row)) for row in rows]
+            cursor = conn.execute(sql)
+            cols    = [d[0] for d in cursor.description]
+            payload = [dict(zip(cols, row)) for row in cursor.fetchall()]
+            yield json.dumps({'type': 'results', 'rows': payload, 'row_count': len(payload)}) + '\n'
 
-            yield json.dumps({
-                'type': 'results',
-                'rows': payload,
-                'row_count': len(payload)
-            }).encode() + b'\n'
+            yield json.dumps({'type': 'status', 'message': 'Synthesising answer...'}) + '\n'
+            await asyncio.sleep(0)
 
-            yield json.dumps({'type': 'status', 'message': 'Synthesizing answer...'}).encode() + b'\n'
-
-            # Synthesize answer
             answer = llm.synthesize_answer(text, sql, payload)
-            yield json.dumps({'type': 'answer', 'text': answer}).encode() + b'\n'
-
             llm.add_to_history(text, answer)
-            yield json.dumps({'type': 'done'}).encode() + b'\n'
+            yield json.dumps({'type': 'answer', 'text': answer}) + '\n'
+            yield json.dumps({'type': 'done'}) + '\n'
+
         except sqlite3.Error as e:
-            yield json.dumps({'type': 'error', 'message': str(e)}).encode() + b'\n'
+            yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
         finally:
             conn.close()
 
-    return StreamingResponse(event_generator(), media_type='application/x-ndjson')
+    return StreamingResponse(event_stream(), media_type='application/x-ndjson')
+
+
+# ── Conversation ───────────────────────────────────────────────────
 
 @app.get('/conversation/history')
-def get_conversation_history() -> Dict[str, Any]:
-    """Get conversation history (optional feature)."""
+def get_conversation_history():
+    """Return history in frontend-compatible format {query, answer, timestamp}."""
     llm = get_llm_service()
-    history = llm.get_history()
-    return {
-        'messages': history,
-        'message_count': len(history)
-    }
+    raw = llm.get_history()   # [{role, content, timestamp}]
+
+    # Pair up user/assistant turns
+    messages = []
+    for i in range(0, len(raw) - 1, 2):
+        if raw[i]['role'] == 'user' and raw[i+1]['role'] == 'assistant':
+            messages.append({
+                'query':     raw[i]['content'],
+                'answer':    raw[i+1]['content'],
+                'timestamp': raw[i].get('timestamp', ''),
+            })
+    return {'messages': messages, 'message_count': len(messages)}
 
 @app.post('/conversation/clear')
-def clear_conversation_history() -> Dict[str, str]:
-    """Clear conversation history (optional feature)."""
-    llm = get_llm_service()
-    llm.clear_history()
-    return {'status': 'cleared', 'message': 'Conversation history cleared'}
+def clear_conversation_history():
+    get_llm_service().clear_history()
+    return {'status': 'cleared'}
+
+
+# ── Query explain ──────────────────────────────────────────────────
 
 @app.post('/query/explain')
-def explain_query(req: QueryRequest) -> Dict[str, Any]:
-    """Explain what a natural language query means (optional feature)."""
+def explain_query(req: QueryRequest):
     text = req.prompt.strip()
     if not text:
         raise HTTPException(status_code=400, detail='Prompt is required')
 
     guardrails = get_guardrails()
     is_safe, message, category = guardrails.check_query(text)
-
-    explanation = f"Query intent: {text}\n\n"
-
-    if not is_safe:
-        explanation += f"Status: ❌ Blocked\n{message}"
-    else:
-        explanation += f"Status: ✓ Valid O2C query\n"
-
-    # Extract potential entities
     entities = guardrails.extract_entities(text)
-    if any(entities.values()):
-        explanation += "\nPotential entities mentioned:\n"
-        for entity_type, values in entities.items():
-            if values:
-                explanation += f"  - {entity_type}: {', '.join(values)}\n"
-
-    explanation += "\nWhat you're asking about:\n"
-    explanation += guardrails.get_context_hint(text)
 
     return {
-        'query': text,
-        'explanation': explanation,
+        'query':    text,
+        'safe':     is_safe,
         'category': category.value,
-        'safe': is_safe
+        'message':  message,
+        'entities': entities,
+        'hint':     guardrails.get_context_hint(text),
     }

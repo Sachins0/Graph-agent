@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from dotenv import load_dotenv
 from groq import Groq
+from datetime import datetime
 
 load_dotenv()
 
@@ -204,10 +205,14 @@ Generate a natural language answer based on these results."""
             return self._fallback_answer(user_prompt, query_results)
 
     def add_to_history(self, user: str, assistant: str):
-        """Add exchange to conversation history."""
-        self.conversation_history.append({"role": "user",      "content": user})
-        self.conversation_history.append({"role": "assistant",  "content": assistant})
-
+        """Add exchange to conversation history with timestamps."""
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+        self.conversation_history.append({
+            "role": "user", "content": user, "timestamp": ts
+        })
+        self.conversation_history.append({
+            "role": "assistant", "content": assistant, "timestamp": ts
+        })
     def get_history(self) -> List[Dict[str, str]]:
         return self.conversation_history
 
