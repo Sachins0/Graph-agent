@@ -6,7 +6,7 @@ import {
   IconButton, Drawer, List, ListItem, ListItemText,
   Divider, Accordion, AccordionSummary, AccordionDetails,
   CircularProgress, Grid, Tooltip, Switch, FormControlLabel,
-  Dialog, DialogTitle, DialogContent, DialogActions, Badge, Alert
+  Dialog, DialogTitle, DialogContent, DialogActions, Alert
 } from '@mui/material'
 import {
   Send, Refresh, ExpandMore, Close, Search, Chat,
@@ -17,73 +17,80 @@ import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// ── All node types including BillingHeader (was missing before) ───
 const NODE_TYPES = {
-  SalesOrderHeader: { color: '#1976d2', icon: '📋' },
-  SalesOrderItem:   { color: '#42a5f5', icon: '📦' },
-  DeliveryHeader:   { color: '#388e3c', icon: '🚚' },
-  DeliveryItem:     { color: '#66bb6a', icon: '📦' },
-  BillingHeader:    { color: '#f57c00', icon: '🧾' },   // ← was missing
-  BillingItem:      { color: '#ffa726', icon: '💰' },
-  JournalEntry:     { color: '#7b1fa2', icon: '📊' },
-  Payment:          { color: '#c2185b', icon: '💳' },
-  Customer:         { color: '#0097a7', icon: '👤' },
-  Product:          { color: '#689f38', icon: '🏷️' },
+  SalesOrderHeader: { color: '#2196f3', icon: '📋' },
+  SalesOrderItem:   { color: '#64b5f6', icon: '📦' },
+  DeliveryHeader:   { color: '#4caf50', icon: '🚚' },
+  DeliveryItem:     { color: '#81c784', icon: '📦' },
+  BillingHeader:    { color: '#ff9800', icon: '🧾' },
+  BillingItem:      { color: '#ffb74d', icon: '💰' },
+  JournalEntry:     { color: '#9c27b0', icon: '📊' },
+  Payment:          { color: '#e91e63', icon: '💳' },
+  Customer:         { color: '#00bcd4', icon: '👤' },
+  Product:          { color: '#8bc34a', icon: '🏷️' },
 }
 
 const NODE_SIZES = {
-  SalesOrderHeader: 8, SalesOrderItem: 6,
-  DeliveryHeader: 7,   DeliveryItem: 5,
-  BillingHeader: 7,    BillingItem: 6,
+  SalesOrderHeader: 8, SalesOrderItem: 5,
+  DeliveryHeader: 7,   DeliveryItem: 4,
+  BillingHeader: 7,    BillingItem: 5,
   JournalEntry: 5,     Payment: 6,
-  Customer: 8,         Product: 5,
+  Customer: 9,         Product: 4,
 }
 
-function App() {
-  const [graphData, setGraphData]               = useState({ nodes: [], links: [] })
-  const [filteredData, setFilteredData]         = useState({ nodes: [], links: [] })
-  const [query, setQuery]                       = useState('')
-  const [answer, setAnswer]                     = useState('')
-  const [sqlQuery, setSqlQuery]                 = useState('')
-  const [loading, setLoading]                   = useState(false)
-  const [selectedNode, setSelectedNode]         = useState(null)
-  const [nodeDetails, setNodeDetails]           = useState(null)
-  const [drawerOpen, setDrawerOpen]             = useState(false)
-  const [conversationHistory, setConversationHistory] = useState([])
-  const [nodeFilter, setNodeFilter]             = useState({})
-  const [relationshipFilter, setRelationshipFilter] = useState({})
-  const [highlightMode, setHighlightMode]       = useState(false)
-  const [metadataDialog, setMetadataDialog]     = useState(false)
-  const [traceDialog, setTraceDialog]           = useState(false)
-  const [traceData, setTraceData]               = useState(null)
-  const [traceLoading, setTraceLoading]         = useState(false)
-  const [searchTerm, setSearchTerm]             = useState('')
-  const [graphStats, setGraphStats]             = useState(null)
-  const [showSql, setShowSql]                   = useState(false)
-  const [errorMsg, setErrorMsg]                 = useState('')
+export default function App() {
+  const [graphData, setGraphData]         = useState({ nodes: [], links: [] })
+  const [filteredData, setFilteredData]   = useState({ nodes: [], links: [] })
+  const [query, setQuery]                 = useState('')
+  const [answer, setAnswer]               = useState('')
+  const [sqlQuery, setSqlQuery]           = useState('')
+  const [loading, setLoading]             = useState(false)
+  const [selectedNode, setSelectedNode]   = useState(null)
+  const [nodeDetails, setNodeDetails]     = useState(null)
+  const [drawerOpen, setDrawerOpen]       = useState(false)
+  const [history, setHistory]             = useState([])
+  const [nodeFilter, setNodeFilter]       = useState({})
+  const [relFilter, setRelFilter]         = useState({})
+  const [highlightMode, setHighlightMode] = useState(false)
+  const [metaDialog, setMetaDialog]       = useState(false)
+  const [traceDialog, setTraceDialog]     = useState(false)
+  const [traceData, setTraceData]         = useState(null)
+  const [searchTerm, setSearchTerm]       = useState('')
+  const [graphStats, setGraphStats]       = useState(null)
+  const [showSql, setShowSql]             = useState(false)
+  const [errorMsg, setErrorMsg]           = useState('')
+  const [graphDims, setGraphDims]         = useState({ w: 0, h: 0 })
 
-  // Set of node IDs to visually highlight (from hover OR query results)
-  const [highlightedNodes, setHighlightedNodes] = useState(new Set())
-  const [highlightedLinks, setHighlightedLinks] = useState(new Set())
+  // ── Use refs for highlights — avoids stale closure in canvas callbacks ──
+  const highlightedNodesRef = useRef(new Set())
+  const highlightedLinksRef = useRef(new Set())
+  const highlightTick       = useRef(0)           // increment to force canvas redraw
+  const [, forceRender]     = useState(0)         // only used to trigger re-render when needed
 
-  const fgRef = useRef()
+  const fgRef        = useRef()
+  const graphBoxRef  = useRef()
 
+  // ── Measure graph container for explicit ForceGraph2D dimensions ──
   useEffect(() => {
-    fetchGraph()
-    fetchConversationHistory()
+    const obs = new ResizeObserver(entries => {
+      for (const e of entries) {
+        setGraphDims({ w: e.contentRect.width, h: e.contentRect.height })
+      }
+    })
+    if (graphBoxRef.current) obs.observe(graphBoxRef.current)
+    return () => obs.disconnect()
   }, [])
 
-  useEffect(() => {
-    applyFilters()
-  }, [graphData, nodeFilter, relationshipFilter, searchTerm])
+  useEffect(() => { fetchGraph(); fetchHistory() }, [])
 
-  // ── Data fetching ─────────────────────────────────────────────
+  useEffect(() => { applyFilters() }, [graphData, nodeFilter, relFilter, searchTerm])
+
+  // ── Data fetching ───────────────────────────────────────────────────────
 
   const fetchGraph = async () => {
-    setLoading(true)
-    setErrorMsg('')
+    setLoading(true); setErrorMsg('')
     try {
-      const res = await axios.get(`${API_URL}/graph/full`)
+      const res = await axios.get(`${API_URL}/graph/full`, { timeout: 60000 })
       const nodes = res.data.nodes.map(n => ({
         id:    n.id,
         name:  n.label,
@@ -99,38 +106,26 @@ function App() {
       }))
       setGraphData({ nodes, links })
     } catch (err) {
-      setErrorMsg('Error loading graph from backend. Is the server running?')
-    } finally {
-      setLoading(false)
-    }
+      setErrorMsg('Could not load graph. Is the backend running?')
+    } finally { setLoading(false) }
   }
 
-  const fetchConversationHistory = async () => {
+  const fetchHistory = async () => {
     try {
       const res = await axios.get(`${API_URL}/conversation/history`)
-      setConversationHistory(res.data.messages || [])
+      setHistory(res.data.messages || [])
     } catch { /* silent */ }
   }
 
-  const fetchGraphStats = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/graph/stats`)
-      setGraphStats(res.data)
-    } catch { /* silent */ }
-  }
-
-  // ── Filters ───────────────────────────────────────────────────
+  // ── Filters ─────────────────────────────────────────────────────────────
 
   const applyFilters = useCallback(() => {
     let nodes = [...graphData.nodes]
     let links = [...graphData.links]
-
-    if (Object.values(nodeFilter).some(Boolean)) {
+    if (Object.values(nodeFilter).some(Boolean))
       nodes = nodes.filter(n => nodeFilter[n.type])
-    }
-    if (Object.values(relationshipFilter).some(Boolean)) {
-      links = links.filter(l => relationshipFilter[l.relationship])
-    }
+    if (Object.values(relFilter).some(Boolean))
+      links = links.filter(l => relFilter[l.relationship])
     if (searchTerm) {
       const s = searchTerm.toLowerCase()
       nodes = nodes.filter(n =>
@@ -138,390 +133,397 @@ function App() {
         n.id?.toLowerCase().includes(s)   ||
         n.type?.toLowerCase().includes(s)
       )
-      const nodeIds = new Set(nodes.map(n => n.id))
-      links = links.filter(l =>
-        nodeIds.has(typeof l.source === 'object' ? l.source.id : l.source) &&
-        nodeIds.has(typeof l.target === 'object' ? l.target.id : l.target)
-      )
+      const ids = new Set(nodes.map(n => n.id))
+      links = links.filter(l => {
+        const src = typeof l.source === 'object' ? l.source.id : l.source
+        const tgt = typeof l.target === 'object' ? l.target.id : l.target
+        return ids.has(src) && ids.has(tgt)
+      })
     }
     setFilteredData({ nodes, links })
-  }, [graphData, nodeFilter, relationshipFilter, searchTerm])
+  }, [graphData, nodeFilter, relFilter, searchTerm])
 
-  // ── Query ─────────────────────────────────────────────────────
+  // ── Highlight helpers (ref-based, no stale closure) ─────────────────────
+
+  const setHighlights = (nodeIds, links = new Set()) => {
+    highlightedNodesRef.current = nodeIds
+    highlightedLinksRef.current = links
+    highlightTick.current += 1
+    forceRender(t => t + 1)       // trigger one re-render so React re-passes callbacks
+    fgRef.current?.refresh?.()    // tell ForceGraph to redraw canvas immediately
+  }
+
+  const clearHighlights = () => setHighlights(new Set(), new Set())
+
+  // ── Query ────────────────────────────────────────────────────────────────
 
   const handleQuery = async () => {
     if (!query.trim()) return
-    setLoading(true)
-    setErrorMsg('')
-    setSqlQuery('')
+    setLoading(true); setErrorMsg(''); setSqlQuery('')
     try {
       const res = await axios.post(`${API_URL}/query`, { prompt: query })
-
       if (res.data.blocked) {
-        setAnswer(res.data.answer || res.data.error)
+        setAnswer(res.data.answer || res.data.error || 'Blocked.')
         setErrorMsg(res.data.hint || '')
         return
       }
-
       setAnswer(res.data.answer ?? JSON.stringify(res.data, null, 2))
       if (res.data.sql) setSqlQuery(res.data.sql)
 
-      // ── Wire highlight_ids from backend → graph highlight ────
+      // ── Apply highlights from backend highlight_ids ──────────────
       if (res.data.highlight_ids?.length) {
-        const ids = new Set(res.data.highlight_ids)
-        setHighlightedNodes(ids)
-        // Also highlight edges connected to these nodes
+        const ids   = new Set(res.data.highlight_ids)
         const hLinks = new Set()
         filteredData.links.forEach(l => {
           const src = typeof l.source === 'object' ? l.source.id : l.source
           const tgt = typeof l.target === 'object' ? l.target.id : l.target
           if (ids.has(src) || ids.has(tgt)) hLinks.add(l)
         })
-        setHighlightedLinks(hLinks)
-        // Auto-center on first highlighted node
-        const firstNode = filteredData.nodes.find(n => ids.has(n.id))
-        if (firstNode?.x != null) {
-          fgRef.current?.centerAt(firstNode.x, firstNode.y, 800)
-          fgRef.current?.zoom(2.5, 800)
+        setHighlights(ids, hLinks)
+        const first = filteredData.nodes.find(n => ids.has(n.id))
+        if (first?.x != null) {
+          fgRef.current?.centerAt(first.x, first.y, 800)
+          fgRef.current?.zoom(3, 800)
         }
       } else {
-        setHighlightedNodes(new Set())
-        setHighlightedLinks(new Set())
+        clearHighlights()
       }
-
-      fetchConversationHistory()
+      fetchHistory()
     } catch (err) {
       setErrorMsg('Error: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
-  const clearHighlights = () => {
-    setHighlightedNodes(new Set())
-    setHighlightedLinks(new Set())
-  }
-
-  // ── Node interaction ──────────────────────────────────────────
+  // ── Node interaction ─────────────────────────────────────────────────────
 
   const handleNodeClick = async (node) => {
-    setSelectedNode(node)
-    setNodeDetails(null)
+    setSelectedNode(node); setNodeDetails(null)
     try {
       const res = await axios.get(`${API_URL}/graph/entity/${encodeURIComponent(node.id)}`)
-      setNodeDetails(res.data)
-      setMetadataDialog(true)
-    } catch {
-      setErrorMsg('Error loading node details')
-    }
+      setNodeDetails(res.data); setMetaDialog(true)
+    } catch { setErrorMsg('Error loading node details') }
   }
 
   const handleNodeHover = useCallback((node) => {
     if (!highlightMode) return
+    if (!node) { clearHighlights(); return }
 
-    if (!node) {
-      // Clear hover highlights (but keep query highlights)
-      setHighlightedNodes(new Set())
-      setHighlightedLinks(new Set())
-      return
-    }
-
-    const connectedNodeIds = new Set([node.id])
-    const connectedLinks   = new Set()
-
-    filteredData.links.forEach(link => {
-      const srcId = typeof link.source === 'object' ? link.source.id : link.source
-      const tgtId = typeof link.target === 'object' ? link.target.id : link.target
-      if (srcId === node.id || tgtId === node.id) {
-        connectedNodeIds.add(srcId)
-        connectedNodeIds.add(tgtId)
-        connectedLinks.add(link)
+    const ids   = new Set([node.id])
+    const hLinks = new Set()
+    filteredData.links.forEach(l => {
+      const src = typeof l.source === 'object' ? l.source.id : l.source
+      const tgt = typeof l.target === 'object' ? l.target.id : l.target
+      if (src === node.id || tgt === node.id) {
+        ids.add(src); ids.add(tgt); hLinks.add(l)
       }
     })
-
-    setHighlightedNodes(connectedNodeIds)
-    setHighlightedLinks(connectedLinks)
+    setHighlights(ids, hLinks)
   }, [highlightMode, filteredData.links])
 
-  // ── Trace O2C flow ────────────────────────────────────────────
-
   const handleTraceFlow = async (billingDoc) => {
-    setTraceLoading(true)
     try {
       const res = await axios.get(`${API_URL}/graph/trace/${billingDoc}`)
-      setTraceData(res.data)
-      setMetadataDialog(false)
-      setTraceDialog(true)
+      setTraceData(res.data); setMetaDialog(false); setTraceDialog(true)
     } catch (err) {
-      setErrorMsg('Flow trace failed: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setTraceLoading(false)
+      setErrorMsg('Trace failed: ' + (err.response?.data?.detail || err.message))
     }
   }
 
-  // ── Graph controls ────────────────────────────────────────────
+  // ── Graph controls ───────────────────────────────────────────────────────
 
-  const handleZoomIn  = () => fgRef.current?.zoom(fgRef.current.zoom() * 1.2, 200)
-  const handleZoomOut = () => fgRef.current?.zoom(fgRef.current.zoom() * 0.8, 200)
-  const handleCenter  = () => { fgRef.current?.centerAt(0, 0, 1000); fgRef.current?.zoom(1, 1000) }
+  const zoomIn  = () => fgRef.current?.zoom(fgRef.current.zoom() * 1.3, 200)
+  const zoomOut = () => fgRef.current?.zoom(fgRef.current.zoom() * 0.7, 200)
+  const center  = () => { fgRef.current?.centerAt(0, 0, 800); fgRef.current?.zoom(1, 800) }
 
-  const toggleFilter = (type, filterType) => {
-    if (filterType === 'node') {
-      setNodeFilter(prev => ({ ...prev, [type]: !prev[type] }))
-    } else {
-      setRelationshipFilter(prev => ({ ...prev, [type]: !prev[type] }))
-    }
+  const toggleFilter = (val, type) => {
+    if (type === 'node') setNodeFilter(p => ({ ...p, [val]: !p[val] }))
+    else setRelFilter(p => ({ ...p, [val]: !p[val] }))
   }
 
-  // ── Canvas drawing ────────────────────────────────────────────
+  // ── Canvas drawing — reads from refs, never stale ────────────────────────
 
   const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
-    const isHighlighted = highlightedNodes.size === 0 || highlightedNodes.has(node.id)
-    const fontSize = Math.max(12 / globalScale, 4)
-    ctx.font = `${fontSize}px Sans-Serif`
+    const hnodes   = highlightedNodesRef.current
+    const hasHL    = hnodes.size > 0
+    const isHL     = hnodes.has(node.id)
+    const dimmed   = hasHL && !isHL
+    const fontSize = Math.max(10 / globalScale, 3)
 
-    const radius = node.val || 5
-    const alpha  = isHighlighted ? 1 : 0.15   // dim non-highlighted nodes
+    ctx.globalAlpha = dimmed ? 0.12 : 1
 
-    ctx.globalAlpha = alpha
-
-    // Highlight ring for highlighted nodes
-    if (highlightedNodes.has(node.id) && highlightedNodes.size > 0) {
+    // Gold ring for highlighted node
+    if (isHL) {
       ctx.beginPath()
-      ctx.arc(node.x, node.y, radius + 3, 0, 2 * Math.PI)
-      ctx.fillStyle = 'rgba(255, 215, 0, 0.4)'
+      ctx.arc(node.x, node.y, node.val + 4, 0, 2 * Math.PI)
+      ctx.fillStyle = 'rgba(255,215,0,0.35)'
       ctx.fill()
       ctx.strokeStyle = '#FFD700'
-      ctx.lineWidth = 2
+      ctx.lineWidth   = 2.5 / globalScale
       ctx.stroke()
     }
 
     // Main circle
     ctx.beginPath()
-    ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI)
+    ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI)
     ctx.fillStyle = node.color || '#999'
     ctx.fill()
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 1.5
+    ctx.strokeStyle = isHL ? '#fff' : 'rgba(255,255,255,0.6)'
+    ctx.lineWidth   = isHL ? 2 / globalScale : 1 / globalScale
     ctx.stroke()
 
-    // Label — only show when zoomed in enough or highlighted
-    if (globalScale >= 1 || highlightedNodes.has(node.id)) {
-      const label      = node.name || node.id
-      const textWidth  = ctx.measureText(label).width
-      const bgW        = textWidth + fontSize * 0.4
-      const bgH        = fontSize + fontSize * 0.4
-      ctx.fillStyle    = 'rgba(255,255,255,0.92)'
-      ctx.fillRect(node.x - bgW / 2, node.y + radius + 2, bgW, bgH)
-      ctx.fillStyle    = '#111'
+    // Label — show when zoomed in or highlighted
+    if (globalScale > 1.2 || isHL) {
+      ctx.font      = `${fontSize}px Sans-Serif`
+      const label   = node.name || node.id
+      const tw      = ctx.measureText(label).width
+      const pad     = fontSize * 0.3
+      const bw      = tw + pad * 2
+      const bh      = fontSize + pad * 2
+      const by      = node.y + node.val + 2 / globalScale
+
+      ctx.fillStyle = 'rgba(10,10,10,0.75)'
+      ctx.beginPath()
+      ctx.roundRect?.(node.x - bw / 2, by, bw, bh, 2) ?? ctx.fillRect(node.x - bw / 2, by, bw, bh)
+      ctx.fill()
+
+      ctx.fillStyle    = '#fff'
       ctx.textAlign    = 'center'
       ctx.textBaseline = 'top'
-      ctx.fillText(label, node.x, node.y + radius + 2 + fontSize * 0.2)
+      ctx.fillText(label, node.x, by + pad)
     }
 
     ctx.globalAlpha = 1
-  }, [highlightedNodes])
+  }, [highlightTick.current])   // re-creates when tick changes → ForceGraph picks it up
 
-  const linkCanvasObject = useCallback((link, ctx) => {
-    const isHighlighted = highlightedLinks.size === 0 || highlightedLinks.has(link)
-    ctx.globalAlpha = isHighlighted ? 1 : 0.08
-  }, [highlightedLinks])
+  const getLinkColor = useCallback((link) => {
+    const hlinks = highlightedLinksRef.current
+    const hnodes = highlightedNodesRef.current
+    if (hlinks.size === 0 && hnodes.size === 0) return 'rgba(180,180,180,0.4)'
+    if (hlinks.has(link)) return '#FF9800'
+    const src = typeof link.source === 'object' ? link.source.id : link.source
+    const tgt = typeof link.target === 'object' ? link.target.id : link.target
+    if (hnodes.has(src) && hnodes.has(tgt)) return '#FF9800'
+    return 'rgba(180,180,180,0.07)'
+  }, [highlightTick.current])
 
-  // ── Derived values ─────────────────────────────────────────────
-  const uniqueNodeTypes     = [...new Set(graphData.nodes.map(n => n.type))]
-  const uniqueRelationships = [...new Set(graphData.links.map(l => l.relationship))]
+  const getLinkWidth = useCallback((link) => {
+    if (highlightedLinksRef.current.has(link)) return 2.5
+    return 0.8
+  }, [highlightTick.current])
 
-  // ── Render ────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────
+
+  const uniqueTypes = [...new Set(graphData.nodes.map(n => n.type))]
+  const uniqueRels  = [...new Set(graphData.links.map(l => l.relationship))]
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#f5f5f5', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', bgcolor: '#111' }}>
 
-      {/* ── Graph Area ────────────────────────────────────── */}
-      <Box sx={{ flex: 2, position: 'relative', bgcolor: '#ffffff' }} className="graph-container">
+      {/* ════ Graph canvas ════════════════════════════════════════ */}
+      <Box ref={graphBoxRef} sx={{ flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden' }}>
 
-        {/* Controls */}
-        <Box className="graph-controls">
-          <Tooltip title="Refresh Graph">
-            <span>
-              <IconButton className="control-button" onClick={fetchGraph} disabled={loading}>
-                <Refresh />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Center">
-            <IconButton className="control-button" onClick={handleCenter}>
-              <CenterFocusStrong />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Zoom In">
-            <IconButton className="control-button" onClick={handleZoomIn}>
-              <ZoomIn />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Zoom Out">
-            <IconButton className="control-button" onClick={handleZoomOut}>
-              <ZoomOut />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={highlightMode ? 'Highlight Mode ON' : 'Highlight Mode OFF'}>
-            <IconButton
-              className="control-button"
+        {/* Top-left controls */}
+        <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 1 }}>
+          {[
+            { title: 'Refresh',         icon: <Refresh />,          fn: fetchGraph,   disabled: loading },
+            { title: 'Center',          icon: <CenterFocusStrong />, fn: center },
+            { title: 'Zoom In',         icon: <ZoomIn />,            fn: zoomIn },
+            { title: 'Zoom Out',        icon: <ZoomOut />,           fn: zoomOut },
+          ].map(({ title, icon, fn, disabled }) => (
+            <Tooltip title={title} key={title}>
+              <span>
+                <IconButton size="small" onClick={fn} disabled={!!disabled}
+                  sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: '#fff', backdropFilter: 'blur(4px)',
+                        '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' }, border: '1px solid rgba(255,255,255,0.15)' }}>
+                  {icon}
+                </IconButton>
+              </span>
+            </Tooltip>
+          ))}
+          <Tooltip title={highlightMode ? 'Hover Highlight ON' : 'Hover Highlight OFF'}>
+            <IconButton size="small"
               onClick={() => { setHighlightMode(h => !h); clearHighlights() }}
-              sx={{ bgcolor: highlightMode ? '#1976d2 !important': {color: highlightMode ? 'white !important' : 'inherit'} }}
-            >
+              sx={{ bgcolor: highlightMode ? '#1976d2' : 'rgba(255,255,255,0.1)',
+                    color: '#fff', backdropFilter: 'blur(4px)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    '&:hover': { bgcolor: highlightMode ? '#1565c0' : 'rgba(255,255,255,0.2)' } }}>
               {highlightMode ? <Visibility /> : <VisibilityOff />}
             </IconButton>
           </Tooltip>
-          {highlightedNodes.size > 0 && (
-            <Tooltip title="Clear Highlights">
-              <IconButton className="control-button" onClick={clearHighlights}>
+          {highlightedNodesRef.current.size > 0 && (
+            <Tooltip title="Clear highlights">
+              <IconButton size="small" onClick={clearHighlights}
+                sx={{ bgcolor: 'rgba(255,152,0,0.3)', color: '#FF9800', border: '1px solid #FF9800' }}>
                 <Close fontSize="small" />
               </IconButton>
             </Tooltip>
           )}
         </Box>
 
-        {/* Stats badge */}
-        <Box className="stats-panel">
-          <Typography variant="caption" sx={{ display: 'block', fontWeight: 600 }}>
-            {filteredData.nodes.length} nodes · {filteredData.links.length} links
+        {/* Top-right stats */}
+        <Box sx={{ position: 'absolute', top: 12, right: 12, zIndex: 10,
+                   bgcolor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                   borderRadius: 2, px: 1.5, py: 0.75, border: '1px solid rgba(255,255,255,0.1)' }}>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)', fontFamily: 'monospace' }}>
+            {filteredData.nodes.length.toLocaleString()} nodes · {filteredData.links.length.toLocaleString()} links
           </Typography>
-          {highlightedNodes.size > 0 && (
-            <Typography variant="caption" sx={{ color: '#f57c00', display: 'block' }}>
-              🔆 {highlightedNodes.size} highlighted
+          {highlightedNodesRef.current.size > 0 && (
+            <Typography variant="caption" sx={{ color: '#FF9800', display: 'block' }}>
+              🔆 {highlightedNodesRef.current.size} highlighted
             </Typography>
           )}
         </Box>
 
         {/* Loading overlay */}
         {loading && (
-          <Box className="loading-overlay">
-            <CircularProgress size={40} />
-            <Typography variant="body2" sx={{ mt: 2, color: '#555' }}>Loading graph...</Typography>
+          <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.6)',
+                     display: 'flex', flexDirection: 'column', alignItems: 'center',
+                     justifyContent: 'center', zIndex: 20 }}>
+            <CircularProgress sx={{ color: '#fff' }} />
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', mt: 2 }}>
+              Loading graph...
+            </Typography>
           </Box>
         )}
 
-        {/* Force Graph */}
-        {filteredData.nodes.length > 0 ? (
+        {graphDims.w > 0 && filteredData.nodes.length > 0 ? (
           <ForceGraph2D
             ref={fgRef}
+            width={graphDims.w}
+            height={graphDims.h}
             graphData={filteredData}
-            nodeLabel={node => `${NODE_TYPES[node.type]?.icon || '📄'} ${node.name} (${node.type})`}
-            nodeVal={node => node.val}
+            backgroundColor="#111111"
+            nodeLabel={n => `${NODE_TYPES[n.type]?.icon || '●'} ${n.name} (${n.type})`}
+            nodeVal={n => n.val}
             onNodeClick={handleNodeClick}
             onNodeHover={handleNodeHover}
-            linkDirectionalArrowLength={4}
-            linkDirectionalArrowRelPos={1}
-            linkLabel={link => link.relationship}
-            linkColor={link => highlightedLinks.has(link) ? '#f57c00' : '#bbb'}
-            linkWidth={link => highlightedLinks.has(link) ? 2.5 : 1}
             nodeCanvasObject={nodeCanvasObject}
             nodeCanvasObjectMode={() => 'replace'}
-            onLinkHover={link => {
-              if (!link) { setHighlightedLinks(new Set()); return }
-            }}
+            linkColor={getLinkColor}
+            linkWidth={getLinkWidth}
+            linkDirectionalArrowLength={3}
+            linkDirectionalArrowRelPos={1}
+            linkLabel={l => l.relationship}
             d3AlphaDecay={0.02}
             d3VelocityDecay={0.3}
-            warmupTicks={50}
+            warmupTicks={60}
           />
-        ) : !loading ? (
-          <Box className="empty-state">
-            <Typography className="empty-state-icon">🔗</Typography>
-            <Typography className="empty-state-title" variant="h6">No graph data</Typography>
-            <Typography className="empty-state-subtitle" variant="body2">
-              Make sure the backend is running and the database is populated
-            </Typography>
-            <Button sx={{ mt: 2 }} variant="contained" onClick={fetchGraph} startIcon={<Refresh />}>
+        ) : !loading && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+                     justifyContent: 'center', height: '100%', color: 'rgba(255,255,255,0.4)' }}>
+            <Analytics sx={{ fontSize: 56, mb: 2, opacity: 0.4 }} />
+            <Typography variant="h6" sx={{ mb: 1 }}>No graph data</Typography>
+            <Button variant="outlined" onClick={fetchGraph} startIcon={<Refresh />}
+              sx={{ color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
               Load Graph
             </Button>
           </Box>
-        ) : null}
+        )}
       </Box>
 
-      {/* ── Sidebar ───────────────────────────────────────── */}
-      <Box sx={{ flex: 1, minWidth: 340, maxWidth: 400, display: 'flex', flexDirection: 'column', borderLeft: 1, borderColor: 'divider', overflow: 'hidden' }} className="sidebar">
+      {/* ════ Sidebar ═════════════════════════════════════════════ */}
+      <Box sx={{
+        width: 360, minWidth: 360, maxWidth: 360,
+        height: '100vh', display: 'flex', flexDirection: 'column',
+        bgcolor: '#1a1a2e', borderLeft: '1px solid rgba(255,255,255,0.08)',
+        overflow: 'hidden', flexShrink: 0,
+      }}>
 
-        {/* Header + Query */}
-        <Box className="query-section">
-          <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: 'white' }}>
-            <Chat /> SAP O2C Assistant
-          </Typography>
+        {/* ── Header ─────────────────────────────────────────── */}
+        <Box sx={{ p: 2, pb: 1.5, background: 'linear-gradient(135deg, #1976d2, #7b1fa2)',
+                   flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chat sx={{ color: '#fff', fontSize: 20 }} />
+              <Typography variant="subtitle1" fontWeight={700} sx={{ color: '#fff' }}>
+                SAP O2C Assistant
+              </Typography>
+            </Box>
+            <Tooltip title="Settings">
+              <IconButton size="small" onClick={() => { setDrawerOpen(true); axios.get(`${API_URL}/graph/stats`).then(r => setGraphStats(r.data)).catch(() => {}) }}
+                sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                <Settings fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
           {errorMsg && (
-            <Alert severity="warning" sx={{ mb: 1, fontSize: '0.75rem' }} onClose={() => setErrorMsg('')}>
+            <Alert severity="warning" onClose={() => setErrorMsg('')}
+              sx={{ mb: 1, py: 0, fontSize: '0.72rem', bgcolor: 'rgba(255,152,0,0.15)', color: '#ffcc80',
+                    '& .MuiAlert-icon': { color: '#ffcc80' } }}>
               {errorMsg}
             </Alert>
           )}
 
           <TextField
-            fullWidth multiline rows={3}
+            fullWidth multiline minRows={2} maxRows={4}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery() } }}
-            placeholder="Ask: 'Which products appear in the most billing documents?'"
-            variant="outlined" size="small"
-            className="query-textarea"
+            placeholder="Ask about orders, deliveries, billing..."
+            size="small"
             sx={{
               mb: 1,
-              '& .MuiOutlinedInput-root': { color: 'white', borderColor: 'rgba(255,255,255,0.4)' },
-              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.4)' },
-              '& .MuiInputBase-input::placeholder': { color: 'rgba(255,255,255,0.6)' },
+              '& .MuiInputBase-root': {
+                bgcolor: 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                borderRadius: 2,
+                fontSize: '0.875rem',
+              },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+              '& .MuiInputBase-root:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
+              '& .MuiInputBase-root.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#fff' },
+              '& textarea::placeholder': { color: 'rgba(255,255,255,0.45)', opacity: 1 },
+            }}
+          />
+          <Button fullWidth variant="contained" onClick={handleQuery}
+            disabled={loading || !query.trim()}
+            startIcon={loading ? <CircularProgress size={14} sx={{ color: 'inherit' }} /> : <Send />}
+            sx={{ bgcolor: 'rgba(255,255,255,0.18)', color: '#fff', fontWeight: 600,
+                  textTransform: 'none', borderRadius: 2,
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.28)' },
+                  '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' } }}>
+            {loading ? 'Processing...' : 'Ask'}
+          </Button>
+        </Box>
+
+        {/* ── Filters ────────────────────────────────────────── */}
+        <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
+          <TextField fullWidth size="small" placeholder="Search nodes..."
+            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            InputProps={{ startAdornment: <Search sx={{ mr: 1, color: 'rgba(255,255,255,0.4)', fontSize: 18 }} /> }}
+            sx={{
+              mb: 1,
+              '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: '#fff', borderRadius: 2, fontSize: '0.8rem' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.1)' },
+              '& input::placeholder': { color: 'rgba(255,255,255,0.3)', opacity: 1 },
             }}
           />
 
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button
-              fullWidth variant="contained"
-              onClick={handleQuery}
-              disabled={loading || !query.trim()}
-              className="send-button"
-              startIcon={loading ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <Send />}
-              sx={{ bgcolor: 'rgba(255,255,255,0.2)', '&:hover': { bgcolor: 'rgba(255,255,255,0.3)' } }}
-            >
-              {loading ? 'Processing...' : 'Ask'}
-            </Button>
-            <Tooltip title="Settings">
-              <IconButton
-                onClick={() => { setDrawerOpen(true); fetchGraphStats() }}
-                sx={{ color: 'white' }}
-              >
-                <Settings />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Box>
-
-        {/* Filters */}
-        <Box className="filters-section">
-          <TextField
-            fullWidth size="small"
-            placeholder="Search nodes by name, ID or type..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="search-input"
-            InputProps={{ startAdornment: <Search sx={{ mr: 1, color: 'action.active', fontSize: 18 }} /> }}
-          />
-
-          <Accordion disableGutters elevation={0} sx={{ bgcolor: 'transparent' }}>
-            <AccordionSummary expandIcon={<ExpandMore />} sx={{ px: 0, minHeight: 36 }}>
-              <Typography variant="body2" fontWeight={600}>
-                Node Types ({uniqueNodeTypes.length})
+          <Accordion disableGutters elevation={0}
+            sx={{ bgcolor: 'transparent', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMore sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 18 }} />}
+              sx={{ px: 0, minHeight: 32, '& .MuiAccordionSummary-content': { my: 0 } }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Node Types ({uniqueTypes.length})
               </Typography>
             </AccordionSummary>
-            <AccordionDetails sx={{ p: 0 }}>
-              <Box className="chip-container">
-                {uniqueNodeTypes.map(type => (
-                  <Chip
-                    key={type}
-                    label={`${NODE_TYPES[type]?.icon || '📄'} ${type}`}
-                    size="small"
-                    className="node-type-chip"
-                    variant={nodeFilter[type] ? 'filled' : 'outlined'}
-                    onClick={() => toggleFilter(type, 'node')}
+            <AccordionDetails sx={{ p: 0, pb: 1 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {uniqueTypes.map(t => (
+                  <Chip key={t} size="small"
+                    label={`${NODE_TYPES[t]?.icon || '●'} ${t}`}
+                    onClick={() => toggleFilter(t, 'node')}
                     sx={{
-                      bgcolor:     nodeFilter[type] ? NODE_TYPES[type]?.color : 'transparent',
-                      color:       nodeFilter[type] ? 'white' : 'inherit',
-                      borderColor: NODE_TYPES[type]?.color || '#999',
+                      bgcolor:     nodeFilter[t] ? NODE_TYPES[t]?.color : 'rgba(255,255,255,0.07)',
+                      color:       '#fff',
+                      border:      `1px solid ${nodeFilter[t] ? NODE_TYPES[t]?.color : 'rgba(255,255,255,0.15)'}`,
+                      fontSize:    '0.7rem',
+                      height:      24,
+                      cursor:      'pointer',
+                      '&:hover':   { opacity: 0.85 },
                     }}
                   />
                 ))}
@@ -529,21 +531,24 @@ function App() {
             </AccordionDetails>
           </Accordion>
 
-          <Accordion disableGutters elevation={0} sx={{ bgcolor: 'transparent' }}>
-            <AccordionSummary expandIcon={<ExpandMore />} sx={{ px: 0, minHeight: 36 }}>
-              <Typography variant="body2" fontWeight={600}>
-                Relationships ({uniqueRelationships.length})
+          <Accordion disableGutters elevation={0}
+            sx={{ bgcolor: 'transparent', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMore sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 18 }} />}
+              sx={{ px: 0, minHeight: 32, '& .MuiAccordionSummary-content': { my: 0 } }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Relationships ({uniqueRels.length})
               </Typography>
             </AccordionSummary>
-            <AccordionDetails sx={{ p: 0 }}>
-              <Box className="chip-container">
-                {uniqueRelationships.map(rel => (
-                  <Chip
-                    key={rel} label={rel} size="small"
-                    className="relationship-chip"
-                    variant={relationshipFilter[rel] ? 'filled' : 'outlined'}
-                    onClick={() => toggleFilter(rel, 'relationship')}
-                    color={relationshipFilter[rel] ? 'primary' : 'default'}
+            <AccordionDetails sx={{ p: 0, pb: 1 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {uniqueRels.map(r => (
+                  <Chip key={r} size="small" label={r}
+                    onClick={() => toggleFilter(r, 'rel')}
+                    sx={{
+                      bgcolor:  relFilter[r] ? '#1976d2' : 'rgba(255,255,255,0.07)',
+                      color:    '#fff', border: '1px solid rgba(255,255,255,0.15)',
+                      fontSize: '0.7rem', height: 22, cursor: 'pointer',
+                    }}
                   />
                 ))}
               </Box>
@@ -551,65 +556,69 @@ function App() {
           </Accordion>
         </Box>
 
-        {/* Results */}
-        <Box className="results-section">
-          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>Results</Typography>
+        {/* ── Results ────────────────────────────────────────── */}
+        <Box sx={{ flex: 1, overflow: 'auto', px: 2, py: 1.5,
+                   '&::-webkit-scrollbar': { width: 4 },
+                   '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.15)', borderRadius: 2 } }}>
+
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', fontWeight: 600,
+                                               textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 1 }}>
+            Results
+          </Typography>
 
           {answer && (
-            <Paper className="result-card" elevation={0}>
-              <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+            <Paper elevation={0} sx={{ bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                                        borderRadius: 2, p: 1.5, mb: 1.5 }}>
+              <Typography variant="body2" component="pre"
+                sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.78rem',
+                      color: 'rgba(255,255,255,0.85)', lineHeight: 1.6, m: 0 }}>
                 {answer}
               </Typography>
               {sqlQuery && (
-                <Box sx={{ mt: 1, borderTop: 1, borderColor: 'divider', pt: 1 }}>
-                  <Typography
-                    variant="caption"
-                    sx={{ cursor: 'pointer', color: '#1976d2', userSelect: 'none' }}
-                    onClick={() => setShowSql(s => !s)}
-                  >
+                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Typography variant="caption"
+                    sx={{ color: '#64b5f6', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setShowSql(s => !s)}>
                     {showSql ? '▾ Hide SQL' : '▸ Show SQL'}
                   </Typography>
                   {showSql && (
-                    <Typography variant="body2" component="pre" sx={{ mt: 1, fontSize: '0.72rem', fontFamily: 'monospace', color: '#555', whiteSpace: 'pre-wrap' }}>
+                    <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1,
+                                               fontSize: '0.7rem', fontFamily: 'monospace',
+                                               color: '#a5d6a7', whiteSpace: 'pre-wrap', m: 0, overflowX: 'auto' }}>
                       {sqlQuery}
-                    </Typography>
+                    </Box>
                   )}
                 </Box>
               )}
             </Paper>
           )}
 
-          {conversationHistory.length > 0 && (
-            <Accordion disableGutters elevation={0}>
-              <AccordionSummary expandIcon={<ExpandMore />}>
-                <Typography variant="body2" fontWeight={600}>
-                  History ({conversationHistory.length})
+          {history.length > 0 && (
+            <Accordion disableGutters elevation={0}
+              sx={{ bgcolor: 'transparent', '&:before': { display: 'none' } }}>
+              <AccordionSummary expandIcon={<ExpandMore sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 18 }} />}
+                sx={{ px: 0, minHeight: 32 }}>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600,
+                                                     textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  History ({history.length})
                 </Typography>
               </AccordionSummary>
               <AccordionDetails sx={{ p: 0 }}>
-                <List dense disablePadding>
-                  {conversationHistory.slice(-6).reverse().map((msg, idx) => (
-                    <ListItem
-                      key={idx} divider sx={{ px: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
-                      onClick={() => setQuery(msg.query || '')}
-                    >
-                      <ListItemText
-                        primary={msg.query}
-                        secondary={msg.timestamp}
-                        primaryTypographyProps={{ variant: 'body2', noWrap: true }}
-                        secondaryTypographyProps={{ variant: 'caption' }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-                <Button
-                  size="small" fullWidth
-                  onClick={async () => {
-                    await axios.post(`${API_URL}/conversation/clear`)
-                    setConversationHistory([])
-                  }}
-                  sx={{ mt: 0.5, color: 'error.main', fontSize: '0.72rem' }}
-                >
+                {history.slice(-6).reverse().map((msg, i) => (
+                  <Box key={i} onClick={() => setQuery(msg.query || '')}
+                    sx={{ p: 1, mb: 0.5, bgcolor: 'rgba(255,255,255,0.04)', borderRadius: 1,
+                          cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', display: 'block' }} noWrap>
+                      {msg.query}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.65rem' }}>
+                      {msg.timestamp}
+                    </Typography>
+                  </Box>
+                ))}
+                <Button size="small" fullWidth
+                  onClick={async () => { await axios.post(`${API_URL}/conversation/clear`); setHistory([]) }}
+                  sx={{ color: '#ef9a9a', fontSize: '0.7rem', mt: 0.5 }}>
                   Clear History
                 </Button>
               </AccordionDetails>
@@ -618,192 +627,152 @@ function App() {
         </Box>
       </Box>
 
-      {/* ── Settings Drawer ───────────────────────────────── */}
+      {/* ════ Settings Drawer ═════════════════════════════════════ */}
       <Drawer anchor="right" open={drawerOpen} onClose={() => setDrawerOpen(false)}
-        className="settings-drawer" PaperProps={{ className: 'settings-drawer' }}>
+        PaperProps={{ sx: { width: 300, bgcolor: '#1a1a2e', color: '#fff', borderLeft: '1px solid rgba(255,255,255,0.08)' } }}>
         <Box sx={{ p: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" fontWeight={600}>Settings</Typography>
-            <IconButton onClick={() => setDrawerOpen(false)}><Close /></IconButton>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6" fontWeight={700}>Settings</Typography>
+            <IconButton onClick={() => setDrawerOpen(false)} sx={{ color: '#fff' }}><Close /></IconButton>
           </Box>
-
           <FormControlLabel
-            control={<Switch checked={highlightMode} onChange={e => { setHighlightMode(e.target.checked); clearHighlights() }} />}
-            label="Hover Highlight Mode"
+            control={<Switch checked={highlightMode} onChange={e => { setHighlightMode(e.target.checked); clearHighlights() }}
+                       sx={{ '& .MuiSwitch-track': { bgcolor: 'rgba(255,255,255,0.2)' } }} />}
+            label={<Typography variant="body2" sx={{ color: '#fff' }}>Hover Highlight</Typography>}
           />
           <FormControlLabel
-            control={<Switch checked={showSql} onChange={e => setShowSql(e.target.checked)} />}
-            label="Always Show SQL"
+            control={<Switch checked={showSql} onChange={e => setShowSql(e.target.checked)}
+                       sx={{ '& .MuiSwitch-track': { bgcolor: 'rgba(255,255,255,0.2)' } }} />}
+            label={<Typography variant="body2" sx={{ color: '#fff' }}>Always Show SQL</Typography>}
           />
-
-          <Divider sx={{ my: 2 }} />
-
+          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <BarChart fontSize="small" />
-            <Typography variant="subtitle2" fontWeight={600}>Graph Statistics</Typography>
+            <BarChart sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 18 }} />
+            <Typography variant="body2" fontWeight={600} sx={{ color: 'rgba(255,255,255,0.7)' }}>Graph Stats</Typography>
           </Box>
-
-          {graphStats ? (
+          {(graphStats || graphData.nodes.length > 0) && (
             <>
-              <Typography variant="body2">Total Nodes: <strong>{graphStats.total_nodes?.toLocaleString()}</strong></Typography>
-              <Typography variant="body2">Total Edges: <strong>{graphStats.total_edges?.toLocaleString()}</strong></Typography>
-              <Divider sx={{ my: 1 }} />
-              <Typography variant="caption" fontWeight={600} sx={{ display: 'block', mb: 0.5 }}>
-                By Node Type
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.6)' }}>
+                Nodes: <strong style={{ color: '#fff' }}>{(graphStats?.total_nodes || graphData.nodes.length).toLocaleString()}</strong>
               </Typography>
-              {Object.entries(graphStats.node_type_counts || {}).map(([type, count]) => (
-                <Box key={type} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
-                  <Typography variant="caption">{NODE_TYPES[type]?.icon} {type}</Typography>
-                  <Typography variant="caption" fontWeight={600}>{count}</Typography>
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.6)' }}>
+                Edges: <strong style={{ color: '#fff' }}>{(graphStats?.total_edges || graphData.links.length).toLocaleString()}</strong>
+              </Typography>
+              {graphStats?.node_type_counts && Object.entries(graphStats.node_type_counts).map(([t, c]) => (
+                <Box key={t} sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.25 }}>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+                    {NODE_TYPES[t]?.icon} {t}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#fff', fontWeight: 600 }}>{c}</Typography>
                 </Box>
               ))}
-              <Divider sx={{ my: 1 }} />
-              <Typography variant="caption" fontWeight={600} sx={{ display: 'block', mb: 0.5 }}>
-                By Edge Type
-              </Typography>
-              {Object.entries(graphStats.edge_type_counts || {}).map(([rel, count]) => (
-                <Box key={rel} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
-                  <Typography variant="caption">{rel}</Typography>
-                  <Typography variant="caption" fontWeight={600}>{count}</Typography>
-                </Box>
-              ))}
-            </>
-          ) : (
-            <>
-              <Typography variant="body2">Total Nodes: {graphData.nodes.length.toLocaleString()}</Typography>
-              <Typography variant="body2">Total Links: {graphData.links.length.toLocaleString()}</Typography>
-              <Typography variant="body2">Node Types: {uniqueNodeTypes.length}</Typography>
-              <Typography variant="body2">Rel Types: {uniqueRelationships.length}</Typography>
             </>
           )}
-
-          <Divider sx={{ my: 2 }} />
-          <Button fullWidth variant="outlined" size="small" startIcon={<Refresh />} onClick={fetchGraph}>
+          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
+          <Button fullWidth variant="outlined" startIcon={<Refresh />} onClick={fetchGraph}
+            sx={{ color: '#fff', borderColor: 'rgba(255,255,255,0.3)', textTransform: 'none' }}>
             Rebuild Graph
           </Button>
         </Box>
       </Drawer>
 
-      {/* ── Node Metadata Dialog ──────────────────────────── */}
-      <Dialog open={metadataDialog} onClose={() => setMetadataDialog(false)} maxWidth="md" fullWidth className="metadata-dialog">
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* ════ Node Metadata Dialog ════════════════════════════════ */}
+      <Dialog open={metaDialog} onClose={() => setMetaDialog(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1e1e2e', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' } }}>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="h6">
-              {selectedNode && `${NODE_TYPES[selectedNode.type]?.icon || '📄'} ${selectedNode.name}`}
+            <Typography variant="h6" sx={{ fontSize: '1rem' }}>
+              {selectedNode && `${NODE_TYPES[selectedNode.type]?.icon} ${selectedNode.name}`}
             </Typography>
             {selectedNode?.type && (
-              <Chip label={selectedNode.type} size="small"
-                sx={{ bgcolor: NODE_TYPES[selectedNode.type]?.color, color: 'white' }} />
+              <Chip size="small" label={selectedNode.type}
+                sx={{ bgcolor: NODE_TYPES[selectedNode.type]?.color, color: '#fff', fontSize: '0.7rem' }} />
             )}
           </Box>
-          <IconButton onClick={() => setMetadataDialog(false)}><Close /></IconButton>
+          <IconButton onClick={() => setMetaDialog(false)} sx={{ color: 'rgba(255,255,255,0.6)' }}>
+            <Close fontSize="small" />
+          </IconButton>
         </DialogTitle>
-
-        <DialogContent>
+        <DialogContent sx={{ pt: 0 }}>
           {nodeDetails && (
-            <Grid container spacing={1.5} className="property-grid">
+            <Grid container spacing={1}>
               {Object.entries(nodeDetails)
                 .filter(([k]) => !['connections', 'id', 'type', 'label'].includes(k))
-                .map(([key, value]) => (
-                <Grid item xs={6} key={key}>
-                  <Box className="property-item">
-                    <Typography className="property-key">{key}</Typography>
-                    <Typography className="property-value">{String(value ?? '—')}</Typography>
+                .map(([k, v]) => (
+                <Grid item xs={6} key={k}>
+                  <Box sx={{ p: 1, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1,
+                              border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase',
+                                                         letterSpacing: 0.5, fontSize: '0.65rem', display: 'block' }}>
+                      {k}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.8rem', wordBreak: 'break-word' }}>
+                      {String(v ?? '—')}
+                    </Typography>
                   </Box>
                 </Grid>
               ))}
-              {/* Connections count */}
-              {nodeDetails.connections?.length > 0 && (
-                <Grid item xs={12}>
-                  <Box className="property-item">
-                    <Typography className="property-key">Connections</Typography>
-                    <Typography className="property-value">{nodeDetails.connections.length} edges</Typography>
-                  </Box>
-                </Grid>
-              )}
             </Grid>
           )}
         </DialogContent>
-
-        <DialogActions>
-          {/* Trace Flow button — only for BillingHeader nodes */}
+        <DialogActions sx={{ px: 2, pb: 2 }}>
           {selectedNode?.type === 'BillingHeader' && (
-            <Button
-              variant="contained" color="warning"
-              startIcon={traceLoading ? <CircularProgress size={16} /> : <Timeline />}
-              onClick={() => handleTraceFlow(selectedNode.billingDocument || selectedNode.id.replace('BH:', ''))}
-              disabled={traceLoading}
-            >
+            <Button variant="contained" color="warning" startIcon={<Timeline />}
+              onClick={() => handleTraceFlow(selectedNode.billingDocument || selectedNode.id.replace('BH:', ''))}>
               Trace O2C Flow
             </Button>
           )}
           <Button onClick={() => {
-            setMetadataDialog(false)
-            // Highlight this node on the graph
-            setHighlightedNodes(new Set([selectedNode.id]))
-            fgRef.current?.centerAt(selectedNode.x, selectedNode.y, 800)
-            fgRef.current?.zoom(3, 800)
-          }}>
-            Focus on Graph
-          </Button>
-          <Button onClick={() => setMetadataDialog(false)}>Close</Button>
+            if (selectedNode) {
+              setHighlights(new Set([selectedNode.id]))
+              fgRef.current?.centerAt(selectedNode.x, selectedNode.y, 800)
+              fgRef.current?.zoom(4, 800)
+            }
+            setMetaDialog(false)
+          }} sx={{ color: '#64b5f6' }}>Focus</Button>
+          <Button onClick={() => setMetaDialog(false)} sx={{ color: 'rgba(255,255,255,0.6)' }}>Close</Button>
         </DialogActions>
       </Dialog>
 
-      {/* ── O2C Flow Trace Dialog ─────────────────────────── */}
-      <Dialog open={traceDialog} onClose={() => setTraceDialog(false)} maxWidth="lg" fullWidth>
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* ════ Trace Dialog ════════════════════════════════════════ */}
+      <Dialog open={traceDialog} onClose={() => setTraceDialog(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1e1e2e', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' } }}>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Timeline />
+            <Timeline sx={{ color: '#FF9800' }} />
             <Typography variant="h6">O2C Flow Trace</Typography>
           </Box>
-          <IconButton onClick={() => setTraceDialog(false)}><Close /></IconButton>
+          <IconButton onClick={() => setTraceDialog(false)} sx={{ color: 'rgba(255,255,255,0.6)' }}><Close /></IconButton>
         </DialogTitle>
-
         <DialogContent>
           {traceData && (
             <>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 2 }}>
                 {traceData.nodes?.length} nodes · {traceData.edges?.length} edges in this flow
               </Typography>
-              {/* Flow stages summary */}
-              {['SalesOrderHeader', 'DeliveryHeader', 'BillingHeader', 'JournalEntry', 'Payment'].map(type => {
-                const count = traceData.nodes?.filter(n => n.type === type).length || 0
-                return count > 0 ? (
-                  <Chip
-                    key={type}
-                    label={`${NODE_TYPES[type]?.icon} ${type} (${count})`}
-                    sx={{ mr: 1, mb: 1, bgcolor: NODE_TYPES[type]?.color, color: 'white' }}
-                  />
-                ) : null
-              })}
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="caption" color="text.secondary">
-                Tip: Close this dialog — the traced flow is now highlighted on the main graph.
-              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {['SalesOrderHeader','DeliveryHeader','BillingHeader','JournalEntry','Payment'].map(t => {
+                  const c = traceData.nodes?.filter(n => n.type === t).length || 0
+                  return c > 0 ? (
+                    <Chip key={t} label={`${NODE_TYPES[t]?.icon} ${t} (${c})`}
+                      sx={{ bgcolor: NODE_TYPES[t]?.color, color: '#fff' }} />
+                  ) : null
+                })}
+              </Box>
             </>
           )}
         </DialogContent>
-
-        <DialogActions>
-          <Button
-            variant="contained"
+        <DialogActions sx={{ px: 2, pb: 2 }}>
+          <Button variant="contained" color="warning"
             onClick={() => {
-              if (traceData?.nodes?.length) {
-                const ids = new Set(traceData.nodes.map(n => n.id))
-                setHighlightedNodes(ids)
-              }
+              if (traceData?.nodes?.length) setHighlights(new Set(traceData.nodes.map(n => n.id)))
               setTraceDialog(false)
-            }}
-          >
+            }}>
             Highlight on Graph
           </Button>
-          <Button onClick={() => setTraceDialog(false)}>Close</Button>
+          <Button onClick={() => setTraceDialog(false)} sx={{ color: 'rgba(255,255,255,0.6)' }}>Close</Button>
         </DialogActions>
       </Dialog>
-
     </Box>
   )
 }
-
-export default App
