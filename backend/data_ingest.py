@@ -67,22 +67,34 @@ def read_jsonl_file(filepath: Path) -> List[Dict]:
 
 
 def create_table(conn: sqlite3.Connection, table_name: str, sample_row: Dict):
-    """Create table with column types inferred from sample row + UNIQUE constraint for dedup."""
+    """Create table from sample row schema. UNIQUE index added separately."""
     col_defs = []
     for col, val in sample_row.items():
         col_type = detect_sqlite_type(val)
         col_defs.append(f'"{col}" {col_type}')
-
-    pks = TABLE_PKS.get(table_name, [])
-    if pks:
-        pk_cols = ', '.join(f'"{c}"' for c in pks)
-        col_defs.append(f'UNIQUE ({pk_cols})')
 
     create_stmt = (
         f'CREATE TABLE IF NOT EXISTS "{table_name}" '
         f'({", ".join(col_defs)})'
     )
     conn.execute(create_stmt)
+
+    # Add UNIQUE index as a separate statement — avoids "expressions prohibited" error
+    pks        = TABLE_PKS.get(table_name, [])
+    actual_cols = set(sample_row.keys())
+    valid_pks   = [c for c in pks if c in actual_cols]  # only use cols that exist in data
+
+    if valid_pks:
+        pk_cols     = ', '.join(f'"{c}"' for c in valid_pks)
+        index_stmt  = (
+            f'CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}" '
+            f'ON "{table_name}" ({pk_cols})'
+        )
+        try:
+            conn.execute(index_stmt)
+        except sqlite3.OperationalError as e:
+            print(f"  ⚠ Could not create UNIQUE index for {table_name}: {e}")
+
 
 
 def ingest_table(conn: sqlite3.Connection, table_name: str, data: List[Dict]) -> int:

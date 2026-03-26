@@ -380,3 +380,49 @@
   white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
+
+/* ── Highlighted node ring (canvas fallback for DOM elements) ─ */
+.node-highlighted {
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Trace dialog flow step indicator ─────────────────────── */
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border-left: 4px solid #1976d2;
+  margin-bottom: 8px;
+}
+
+/* ── SQL code block ────────────────────────────────────────── */
+.sql-block {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 6px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ── Query section textarea override (white text on purple bg) */
+.query-section .MuiOutlinedInput-root fieldset {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.query-section .MuiOutlinedInput-root:hover fieldset {
+  border-color: rgba(255, 255, 255, 0.7);
+}
+.query-section .MuiOutlinedInput-root.Mui-focused fieldset {
+  border-color: white;
+}
+
+/* ── History item hover ────────────────────────────────────── */
+.history-item:hover {
+  background: #f0f4ff;
+  cursor: pointer;
+}
