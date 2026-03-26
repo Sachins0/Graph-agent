@@ -88,9 +88,10 @@ export default function App() {
   // ── Data fetching ───────────────────────────────────────────────────────
 
   const fetchGraph = async () => {
-    setLoading(true); setErrorMsg('')
+    setLoading(true); setErrorMsg('Waking up backend (may take ~30s on first load)...')
     try {
       const res = await axios.get(`${API_URL}/graph/full`, { timeout: 60000 })
+      setErrorMsg('')
       const nodes = res.data.nodes.map(n => ({
         id:    n.id,
         name:  n.label,
