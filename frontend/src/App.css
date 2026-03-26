@@ -1,0 +1,382 @@
+/* Custom styles for SAP O2C Graph System */
+
+.graph-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.graph-controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.control-button {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.control-button:hover {
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+}
+
+.control-button:active {
+  transform: translateY(0);
+}
+
+.control-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.stats-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.sidebar {
+  background: #ffffff;
+  border-left: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.query-section {
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.query-section h3 {
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.filters-section {
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.results-section {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: #ffffff;
+}
+
+.result-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.result-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+.result-card::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+.chip-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.node-type-chip {
+  border-radius: 16px;
+  font-size: 0.75rem;
+  height: 28px;
+  transition: all 0.2s ease;
+}
+
+.node-type-chip:hover {
+  transform: scale(1.05);
+}
+
+.relationship-chip {
+  border-radius: 12px;
+  font-size: 0.75rem;
+  height: 24px;
+}
+
+.search-input {
+  margin-bottom: 16px;
+}
+
+.search-input .MuiInputBase-root {
+  border-radius: 8px;
+}
+
+.query-textarea {
+  margin-bottom: 12px;
+}
+
+.query-textarea .MuiInputBase-root {
+  border-radius: 8px;
+}
+
+.send-button {
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  text-transform: none;
+  box-shadow: 0 2px 4px rgba(25, 118, 210, 0.2);
+}
+
+.send-button:hover {
+  box-shadow: 0 4px 8px rgba(25, 118, 210, 0.3);
+}
+
+.settings-drawer {
+  width: 320px;
+}
+
+.settings-drawer .MuiDrawer-paper {
+  width: 320px;
+  border-left: 1px solid #e0e0e0;
+}
+
+.metadata-dialog .MuiDialog-paper {
+  border-radius: 12px;
+}
+
+.property-grid {
+  margin-top: 16px;
+}
+
+.property-item {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s ease;
+}
+
+.property-item:hover {
+  background: #e9ecef;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.property-key {
+  font-size: 0.75rem;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.property-value {
+  font-size: 0.875rem;
+  color: #212529;
+  word-break: break-word;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #6c757d;
+}
+
+.empty-state-icon {
+  font-size: 4rem;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.empty-state-subtitle {
+  font-size: 0.875rem;
+  text-align: center;
+  max-width: 300px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .graph-controls {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    justify-content: space-between;
+  }
+
+  .stats-panel {
+    top: 8px;
+    right: 8px;
+    left: auto;
+    padding: 8px;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1200;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .query-section,
+  .filters-section,
+  .results-section {
+    padding: 12px;
+  }
+
+  .settings-drawer {
+    width: 280px;
+  }
+
+  .settings-drawer .MuiDrawer-paper {
+    width: 280px;
+  }
+}
+
+@media (max-width: 480px) {
+  .graph-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .control-button {
+    padding: 6px;
+    min-width: 40px;
+  }
+
+  .query-textarea textarea {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .graph-container {
+    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+  }
+
+  .control-button,
+  .stats-panel {
+    background: rgba(33, 33, 33, 0.95);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+
+  .sidebar {
+    background: #1e1e1e;
+    border-left-color: #333;
+  }
+
+  .filters-section {
+    background: #2a2a2a;
+  }
+
+  .results-section {
+    background: #1e1e1e;
+  }
+
+  .result-card {
+    background: #2a2a2a;
+    border-color: #404040;
+    color: #ffffff;
+  }
+
+  .property-item {
+    background: #2a2a2a;
+    border-color: #404040;
+  }
+
+  .property-value {
+    color: #ffffff;
+  }
+}
+
+/* Animation for node highlights */
+@keyframes highlight-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.node-highlighted {
+  animation: highlight-pulse 2s infinite;
+}
+
+/* Custom tooltip styles */
+.graph-tooltip {
+  background: rgba(33, 33, 33, 0.9);
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}

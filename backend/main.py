@@ -1,10 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import sqlite3
 from pathlib import Path
+import json
 from graph_builder import get_graph_json
+from llm import get_llm_service
+from guardrails import get_guardrails, QueryCategory
 
 app = FastAPI(title='SAP O2C Graph System (Backend)')
 
@@ -102,24 +106,45 @@ def graph_entity(entity_id: str) -> Dict[str, Any]:
 
 class QueryRequest(BaseModel):
     prompt: str
+    include_sql: bool = True
+    streaming: bool = False
+
+class ConversationMessage(BaseModel):
+    role: str  # 'user' or 'assistant'
+    content: str
 
 @app.post('/query')
 def query_graph(req: QueryRequest) -> Dict[str, Any]:
+    """Query with LLM translation and guardrails."""
     text = req.prompt.strip()
     if not text:
         raise HTTPException(status_code=400, detail='Prompt is required')
 
-    blocking = ['who is', 'define', 'philosophy', 'poem', 'movie']
-    if any(b in text.lower() for b in blocking):
-        return {'query': text, 'answer': 'This system only answers dataset-related O2C questions.'}
+    # Apply guardrails
+    guardrails = get_guardrails()
+    is_safe, message, category = guardrails.check_query(text)
 
-    if 'billing documents' in text.lower() and 'highest number' in text.lower():
-        sql = "SELECT material, COUNT(*) AS billing_count FROM billing_document_items GROUP BY material ORDER BY billing_count DESC LIMIT 10"
-    elif 'trace the full flow' in text.lower():
-        sql = "SELECT * FROM sales_order_headers LIMIT 10"
-    else:
-        return {'query': text, 'answer': 'Query translation rule not implemented yet. Use a known supported template.'}
+    if not is_safe:
+        return {
+            'query': text,
+            'error': message,
+            'category': category.value,
+            'blocked': True,
+            'hint': guardrails.get_context_hint(text)
+        }
 
+    # Get LLM service and translate to SQL
+    llm = get_llm_service()
+    sql, is_valid = llm.translate_nl_to_sql(text)
+
+    if not is_valid:
+        return {
+            'query': text,
+            'error': 'Failed to translate query to SQL. Please rephrase your question.',
+            'hint': guardrails.get_context_hint(text)
+        }
+
+    # Execute query
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -127,11 +152,144 @@ def query_graph(req: QueryRequest) -> Dict[str, Any]:
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
         payload = [dict(zip(columns, row)) for row in rows]
+
+        # Synthesize answer using LLM
+        answer = llm.synthesize_answer(text, sql, payload)
+
+        # Add to conversation history
+        llm.add_to_history(text, answer)
+
+        result = {
+            'query': text,
+            'answer': answer,
+            'rows': payload,
+            'row_count': len(payload),
+            'category': category.value
+        }
+
+        if req.include_sql:
+            result['sql'] = sql
+
+        return result
+    except sqlite3.Error as e:
         return {
             'query': text,
-            'sql': sql,
-            'rows': payload,
-            'answer': 'Data-backed response returned. In production this would be converted to NL via LLM.'
+            'error': f'Database error: {str(e)}',
+            'hint': guardrails.get_context_hint(text)
         }
     finally:
         conn.close()
+
+@app.post('/query/streaming')
+def query_graph_streaming(req: QueryRequest) -> StreamingResponse:
+    """Query with streaming response (optional feature)."""
+    text = req.prompt.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail='Prompt is required')
+
+    async def event_generator():
+        # Check guardrails
+        guardrails = get_guardrails()
+        is_safe, message, category = guardrails.check_query(text)
+
+        if not is_safe:
+            yield json.dumps({
+                'type': 'error',
+                'message': message,
+                'blocked': True
+            }).encode() + b'\n'
+            return
+
+        yield json.dumps({'type': 'status', 'message': 'Translating query...'}).encode() + b'\n'
+
+        # Translate to SQL
+        llm = get_llm_service()
+        sql, is_valid = llm.translate_nl_to_sql(text)
+
+        if not is_valid:
+            yield json.dumps({'type': 'error', 'message': 'Failed to translate query'}).encode() + b'\n'
+            return
+
+        yield json.dumps({'type': 'status', 'message': 'Executing query...', 'sql': sql}).encode() + b'\n'
+
+        # Execute
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            payload = [dict(zip(columns, row)) for row in rows]
+
+            yield json.dumps({
+                'type': 'results',
+                'rows': payload,
+                'row_count': len(payload)
+            }).encode() + b'\n'
+
+            yield json.dumps({'type': 'status', 'message': 'Synthesizing answer...'}).encode() + b'\n'
+
+            # Synthesize answer
+            answer = llm.synthesize_answer(text, sql, payload)
+            yield json.dumps({'type': 'answer', 'text': answer}).encode() + b'\n'
+
+            llm.add_to_history(text, answer)
+            yield json.dumps({'type': 'done'}).encode() + b'\n'
+        except sqlite3.Error as e:
+            yield json.dumps({'type': 'error', 'message': str(e)}).encode() + b'\n'
+        finally:
+            conn.close()
+
+    return StreamingResponse(event_generator(), media_type='application/x-ndjson')
+
+@app.get('/conversation/history')
+def get_conversation_history() -> Dict[str, Any]:
+    """Get conversation history (optional feature)."""
+    llm = get_llm_service()
+    history = llm.get_history()
+    return {
+        'messages': history,
+        'message_count': len(history)
+    }
+
+@app.post('/conversation/clear')
+def clear_conversation_history() -> Dict[str, str]:
+    """Clear conversation history (optional feature)."""
+    llm = get_llm_service()
+    llm.clear_history()
+    return {'status': 'cleared', 'message': 'Conversation history cleared'}
+
+@app.post('/query/explain')
+def explain_query(req: QueryRequest) -> Dict[str, Any]:
+    """Explain what a natural language query means (optional feature)."""
+    text = req.prompt.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail='Prompt is required')
+
+    guardrails = get_guardrails()
+    is_safe, message, category = guardrails.check_query(text)
+
+    explanation = f"Query intent: {text}\n\n"
+
+    if not is_safe:
+        explanation += f"Status: ❌ Blocked\n{message}"
+    else:
+        explanation += f"Status: ✓ Valid O2C query\n"
+
+    # Extract potential entities
+    entities = guardrails.extract_entities(text)
+    if any(entities.values()):
+        explanation += "\nPotential entities mentioned:\n"
+        for entity_type, values in entities.items():
+            if values:
+                explanation += f"  - {entity_type}: {', '.join(values)}\n"
+
+    explanation += "\nWhat you're asking about:\n"
+    explanation += guardrails.get_context_hint(text)
+
+    return {
+        'query': text,
+        'explanation': explanation,
+        'category': category.value,
+        'safe': is_safe
+    }

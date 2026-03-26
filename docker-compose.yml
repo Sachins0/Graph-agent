@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sap-o2c-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///o2c.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      # Mount database for persistence
+      - ./backend/o2c.db:/app/backend/o2c.db
+      # Mount env file
+      - ./backend/.env:/app/backend/.env:ro
+    networks:
+      - sap-o2c-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      - data-init
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sap-o2c-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://backend:8000
+    networks:
+      - sap-o2c-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5173/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # Data initialization service
+  data-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sap-o2c-data-init
+    volumes:
+      - ./backend/o2c.db:/app/backend/o2c.db
+      - ./sap-o2c-data:/app/backend/sap-o2c-data:ro
+    networks:
+      - sap-o2c-network
+    command: python data_ingest.py
+    environment:
+      - DATABASE_URL=sqlite:///o2c.db
+    entrypoint: ["sh", "-c", "cd /app/backend && python data_ingest.py && exit 0"]
+    restart: "no"
+
+networks:
+  sap-o2c-network:
+    driver: bridge
+
+volumes:
+  o2c-database:
